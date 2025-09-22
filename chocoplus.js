@@ -1,16 +1,12 @@
 // chocoplus.js: Módulo para manejar los comandos de usuario de Telegram
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { config } from './config.js';
-import free from './lib/free.js';
-import { getUser, updateUserWhatsapp, clearUserWhatsapp, isActive, db } from './lib/users.js';
-import os from 'os'; // Agregar al inicio con los otros imports
-import { createNewToken, verifyAndActivateToken, hasValidAccess, getTokenStats } from './lib/tokens.js';
-
-// ESM: __dirname workaround
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const fs = require('fs');
+const path = require('path');
+const { config } = require('./config.js');
+const free = require('./lib/free.js');
+const { getUser, updateUserWhatsapp, clearUserWhatsapp, isActive, db } = require('./lib/users.js');
+const os = require('os');
+const TelegramBot = require('node-telegram-bot-api');     
+const { createNewToken, verifyAndActivateToken, hasValidAccess, getTokenStats } = require('./lib/tokens.js');
 
 // Utilidad para verificar si un usuario es admin
 function isAdmin(id) {
@@ -18,8 +14,8 @@ function isAdmin(id) {
 }
 
 // Este módulo exporta una función que recibe el bot y otras dependencias
-export default function(bot, dependencies) {
-  const { userStates, activeSessions, cleanSession, sendUserMenu, defineBuyOptions, updateUserWhatsapp, clearUserWhatsapp } = dependencies;
+module.exports = function(bot, dependencies) {
+  const { userStates, activeSessions, cleanSession, sendUserMenu, defineBuyOptions, updateUserWhatsapp, clearUserWhatsapp, startSession } = dependencies;
 
   // --- LÓGICA DE COMANDOS DE TELEGRAM PARA USUARIOS ---
 
@@ -205,11 +201,11 @@ export default function(bot, dependencies) {
         break;
 
       case 'disconnect_whatsapp':
-        cleanSession(chatId);
-        await clearUserWhatsapp(chatId);
-        if (activeSessions[chatId]) delete activeSessions[chatId];
+        await bot.sendMessage(chatId, '🔄 Desconectando tu sesión de WhatsApp, por favor espera...');
+        await cleanSession(chatId); // Llama a la función actualizada que cierra la conexión
+        await clearUserWhatsapp(chatId); // Limpia la base de datos
         
-        await bot.sendMessage(chatId, '❌ Sesión de WhatsApp desconectada. Ahora puedes conectar otro número.', {
+        await bot.sendMessage(chatId, '✅ Sesión de WhatsApp desconectada correctamente. Ahora puedes conectar otro número.', {
           reply_markup: {
             inline_keyboard: [[{ text: '📱 Conectar WhatsApp', callback_data: 'start_pairing' }]]
           }
@@ -305,8 +301,7 @@ export default function(bot, dependencies) {
     const processingMsg = await bot.sendMessage(chatId, '🔄 Generando código de conexión, por favor espera...');
 
     try {
-      const startpairingModule = await import('./bot.js');
-      const startpairing = startpairingModule.default || startpairingModule;
+      const startpairing = require('./bot.js'); // Corregido: usar require directamente
       
       const sessionPath = path.join(__dirname, 'lib', 'pairing', String(chatId), number);
       if (fs.existsSync(sessionPath)) fs.rmSync(sessionPath, { recursive: true, force: true });
@@ -599,8 +594,7 @@ export default function(bot, dependencies) {
       delete userStates[chatId];
       const processingMsg = await bot.sendMessage(chatId, '🔄 Generando código de conexión, por favor espera...');
       try {
-        const startpairingModule = await import('./bot.js');
-        const startpairing = startpairingModule.default || startpairing;
+        const startpairing = require('./bot.js'); // Corregido: usar require directamente
         const sessionPath = path.join(__dirname, 'lib', 'pairing', 'free', String(chatId), number);
         if (fs.existsSync(sessionPath)) fs.rmSync(sessionPath, { recursive: true, force: true });
         fs.mkdirSync(sessionPath, { recursive: true });

@@ -1,24 +1,21 @@
-import { default as makeWASocket, DisconnectReason, makeInMemoryStore, jidDecode, Browsers, proto, getContentType, useMultiFileAuthState, downloadContentFromMessage } from 'baron-baileys-v2';
-import pino from 'pino';
-import { Boom } from '@hapi/boom';
-import fs from 'fs';
-import readline from 'readline';
-import _ from 'lodash';
-import FileType from 'file-type';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-import PhoneNumber from 'awesome-phonenumber';
-import simple from './lib/oke.js';
-import smsg from './lib/smsg.js';
-import { isUrl, generateMessageTag, getBuffer, getSizeMedia, fetchJson as fetch, sleep } from './lib/myfunc.js';
+const { default: makeWASocket, DisconnectReason, makeInMemoryStore, jidDecode, Browsers, proto, getContentType, useMultiFileAuthState, downloadContentFromMessage } = require('baron-baileys-v2');
+const pino = require('pino');
+const { Boom } = require('@hapi/boom');
+const fs = require('fs');
+const readline = require('readline');
+const _ = require('lodash');
+const FileType = require('file-type');
+const path = require('path');
+const PhoneNumber = require('awesome-phonenumber');
+const simple = require('./lib/oke.js');
+const smsg = require('./lib/smsg.js');
+const { isUrl, generateMessageTag, getBuffer, getSizeMedia, fetchJson: fetch, sleep } = require('./lib/myfunc.js');
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+// __dirname y __filename ya están disponibles en CommonJS, no es necesario definirlos.
 
 const store = makeInMemoryStore({ logger: pino().child({ level: 'silent', stream: 'store' }) });
-const question = (text) => { 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout }); 
+const question = (text) => {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => { rl.question(text, resolve) });
 };
 
@@ -32,7 +29,7 @@ async function startpairing(phoneNumber, sessionPath) {
       logger: pino({ level: "silent" }),
       printQRInTerminal: false,
       auth: state,
-      // Actualiza la versión para corregir el error de conexión 
+      // Actualiza la versión para corregir el error de conexión
       version: [2, 3000, 1023223821],
       browser: Browsers.ubuntu("Edge"),
       // Agregar retry y timeout
@@ -43,12 +40,11 @@ async function startpairing(phoneNumber, sessionPath) {
           const msg = await store.loadMessage(key.remoteJid, key.id);
           return msg?.message || '';
         } catch (err) {
-          monitor.logError(err);
+          console.error(err);
           return '';
         }
       }
     }, store);
-
 
     if (!conn.authState.creds.registered) {
       setTimeout(async () => {
@@ -58,11 +54,10 @@ async function startpairing(phoneNumber, sessionPath) {
         if (!fs.existsSync(sessionPath)) fs.mkdirSync(sessionPath, { recursive: true });
         fs.writeFileSync(path.join(sessionPath, 'pairing.json'), JSON.stringify({ code }, null, 2));
       }, 1700);
-
     }
-
+    
     store.bind(conn.ev);
-
+    
     conn.ev.on('messages.upsert', async chatUpdate => {
       try {
         const mek = chatUpdate.messages[0];
@@ -73,12 +68,12 @@ async function startpairing(phoneNumber, sessionPath) {
         if (mek.key.id.startsWith('BAE5') && mek.key.id.length === 16) return;
         
         const m = smsg(conn, mek, store);
-        const bruxin = await import("./bruxin.js");
-        bruxin.default(conn, m, chatUpdate, store);
+        const bruxin = require("./baron.js"); // No se necesita .default
+        bruxin(conn, m, chatUpdate, store);
       } catch (err) {
         console.log(err);
       }
-    })
+    });
 
     // Setting
     conn.decodeJid = (jid) => {
@@ -108,36 +103,36 @@ async function startpairing(phoneNumber, sessionPath) {
     }
 
     conn.public = true
-
     conn.serializeM = (m) => smsg(conn, m, store);
     conn.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect } = update;
       if (connection === 'close') {
-        const userId = sessionPath.split('_').pop();
-        const userSession = userSessions.get(userId);
-        if (userSession) {
-          userSession.isConnected = false;
-          userSessions.set(userId, userSession);
-        }
-        let shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-        console.log('Conexión cerrada debido a ', lastDisconnect?.error, ', reconectando ', shouldReconnect);
+        const reason = new (require('@hapi/boom').Boom)(lastDisconnect?.error)?.output.statusCode;
         
-        // Si no es un cierre de sesión, intentar reconectar
+        const shouldReconnect = 
+          reason !== DisconnectReason.loggedOut &&
+          reason !== DisconnectReason.connectionReplaced &&
+          reason !== DisconnectReason.multideviceMismatch &&
+          reason !== DisconnectReason.forbidden;
+
+        console.log('Conexión de emparejamiento cerrada debido a ', lastDisconnect?.error, `, reconectando: ${shouldReconnect}`);
+        
         if (shouldReconnect) {
+          // Reintentar la conexión para el emparejamiento
           startpairing(phoneNumber, sessionPath);
         } else {
-          // Limpiar sesión si fue logout
+          // Limpiar sesión si la desconexión es permanente (logout, conflicto, etc.)
           if (fs.existsSync(sessionPath)) {
             fs.rmSync(sessionPath, { recursive: true, force: true });
           }
-          console.log('Sesión finalizada por cierre de sesión');
+          console.log('Sesión de emparejamiento finalizada por cierre de sesión o conflicto.');
         }
       } else if (connection === 'open') {
-        console.log('\nConexión abierta\n');
+        console.log('\nConexión de emparejamiento abierta\n');
       }
     });
 
-    // Monitor del sistema cada 5 minutos 
+    // Monitor del sistema cada 5 minutos
     setInterval(() => {
       const heapUsed = process.memoryUsage().heapUsed / 1024 / 1024;
       if (heapUsed > 800) {
@@ -145,7 +140,6 @@ async function startpairing(phoneNumber, sessionPath) {
         global.gc && global.gc();
       }
     }, 300000);
-
 
     conn.ev.on('creds.update', saveCreds)
 
@@ -158,13 +152,14 @@ async function startpairing(phoneNumber, sessionPath) {
         conversation: "NekoBot"
       }
     }
+    /*
     conn.ev.on('messages.update', 
     async(chatUpdate) => {
       for (const { key, update } of chatUpdate) {
         if (update.pollUpdates && key.fromMe) {
            const pollCreation = await getMessage(key);
            if (pollCreation) {
-            let pollUpdate = await getAggregateVotesInPollMessage({
+           let pollUpdate = await getAggregateVotesInPollMessage({
     message: pollCreation?.message,
     pollUpdates: update.pollUpdates,
     });
@@ -173,10 +168,11 @@ async function startpairing(phoneNumber, sessionPath) {
     await appenTextMessage(m, conn, toCmd, pollCreation);
     await conn.sendMessage(m.cht, { delete: key });
            } else return false
-    return 
+    return
          }
        }
     });
+    */
 
     conn.sendText = (jid, text, quoted = '', options) => conn.sendMessage(jid, { text: text, ...options }, { quoted })
 //=========================================\\
@@ -204,7 +200,7 @@ let type = await FileType.fromBuffer(data) || {
 mime: 'application/octet-stream',
 ext: '.bin'
 }
-filename = path.join(__filename, '../src/' + new Date * 1 + '.' + type.ext)
+filename = path.join(__dirname, '../src/' + new Date * 1 + '.' + type.ext)
 if (data && save) fs.promises.writeFile(filename, data)
 return {
 res,
@@ -213,7 +209,6 @@ size: await getSizeMedia(data),
 ...type,
 data
 }
-
 }
 
 conn.sendFile = async (jid, path, filename = '', caption = '', quoted, ptt = false, options = {}) => {
@@ -287,16 +282,15 @@ buffer = Buffer.concat([buffer, chunk])
 }
 return buffer
 }
-
 return conn
 }
 WhatsAppStart()
 }
 
-export default startpairing;
+module.exports = startpairing;
 
 // Watcher
-const file = fileURLToPath(import.meta.url);
+const file = __filename;
 fs.watchFile(file, () => {
   fs.unwatchFile(file);
   console.log(`Update ${file}`);

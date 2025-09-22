@@ -1,26 +1,14 @@
-import TelegramBot from 'node-telegram-bot-api';
-import fs from 'fs';
-import path from 'path';
-import pino from 'pino';
-import simple from './lib/oke.js';
-import smsg from './lib/smsg.js'; // Agregar la extensión .js
-import { default as makeWASocket, Browsers, useMultiFileAuthState, DisconnectReason, makeInMemoryStore, jidDecode, proto, getContentType, downloadContentFromMessage } from 'baron-baileys-v2';
-import { 
-  getUser, 
-  updateUserWhatsapp, 
-  clearUserWhatsapp, 
-  isActive,
-  db 
-} from './lib/users.js'; // Agregar la extensión .js
-import dotenv from 'dotenv';
-dotenv.config();
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+const TelegramBot = require('node-telegram-bot-api');
+const fs = require('fs');
+const path = require('path');
+const pino = require('pino');
+const simple = require('./lib/oke.js');
+const smsg = require('./lib/smsg.js');
+const { default: makeWASocket, Browsers, useMultiFileAuthState, DisconnectReason, makeInMemoryStore, jidDecode, proto, getContentType, downloadContentFromMessage } = require('baron-baileys-v2');
+const { getUser, updateUserWhatsapp, clearUserWhatsapp, isActive, db } = require('./lib/users.js');
+const dotenv = require('dotenv');
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const TOKEN = process.env.BOT_TOKEN || 'pon_tu_token_aqui'; // Usa .env
+const TOKEN = process.env.BOT_TOKEN || '8374619961:AAH63uFQIPantsyzt6ephpIB0BtU67bc-Co'; // Usa .env
 const bot = new TelegramBot(TOKEN, { polling: true });
 
 const activeSessions = {};
@@ -77,32 +65,36 @@ async function startSession(telegram_id, number) {
   conn.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect } = update;
     if (connection === 'close') {
-      const code = lastDisconnect?.error?.output?.statusCode;
-      if (
-        code === DisconnectReason.loggedOut ||
-        code === DisconnectReason.forbidden
-      ) {
-        console.log('Desconectado permanentemente con código:', code);
-        delete activeSessions[telegram_id];
-        cleanSession(telegram_id);
-        await clearUserWhatsapp(telegram_id);
-        // NO recargues comandos ni listeners aquí.
-      } else {
+      const reason = new (require('@hapi/boom').Boom)(lastDisconnect?.error)?.output.statusCode;
+      console.log(`Conexión cerrada, razón: ${reason}`);
+
+      const shouldReconnect = 
+        reason !== DisconnectReason.loggedOut &&
+        reason !== DisconnectReason.connectionReplaced &&
+        reason !== DisconnectReason.multideviceMismatch &&
+        reason !== DisconnectReason.forbidden;
+
+      if (shouldReconnect) {
         reconnectTries++;
         if (reconnectTries <= 5) {
-          console.log('Desconexión temporal, reintentando conexión en 3s...');
+          const delay = Math.pow(2, reconnectTries) * 1000; // Retardo exponencial: 2s, 4s, 8s...
+          console.log(`Desconexión temporal, reintentando conexión en ${delay / 1000}s... (Intento ${reconnectTries})`);
           clearTimeout(reconnectTimeout);
-          reconnectTimeout = setTimeout(() => startSession(telegram_id, number), 3000);
+          reconnectTimeout = setTimeout(() => startSession(telegram_id, number), delay);
         } else {
           console.log('Demasiados intentos de reconexión fallidos, limpiando sesión...');
           delete activeSessions[telegram_id];
           cleanSession(telegram_id);
           await clearUserWhatsapp(telegram_id);
-          // NO recargues comandos ni listeners aquí.
         }
+      } else {
+        console.log('Desconexión permanente, limpiando sesión...');
+        delete activeSessions[telegram_id];
+        cleanSession(telegram_id);
+        await clearUserWhatsapp(telegram_id);
       }
     } else if (connection === 'open') {
-      reconnectTries = 0;
+      reconnectTries = 0; // Reiniciar contador al conectar
       console.log(`WhatsApp ${number} conectado para usuario ${telegram_id}.`);
     }
   });
@@ -133,8 +125,8 @@ async function startSession(telegram_id, number) {
       if (!conn.public && !mek.key.fromMe && chatUpdate.type === 'notify') return;
       if (mek.key.id.startsWith('BAE5') && mek.key.id.length === 16) return;
       const m = smsg(conn, mek, store);
-      const bruxin = await import('./bruxin.js');
-      bruxin.default(conn, m, chatUpdate, store);
+      const bruxin = require('./baron.js');
+      bruxin(conn, m, chatUpdate, store);
     } catch (err) {
       console.log(err);
     }
@@ -143,13 +135,21 @@ async function startSession(telegram_id, number) {
   return conn;
 }
 
-function cleanSession(telegram_id) {
+async function cleanSession(telegram_id) {
+  const conn = activeSessions[telegram_id];
+  if (conn) {
+    // Cierra la conexión de forma segura
+    await conn.logout();
+  }
+
   const pairingDir = path.join(__dirname, 'lib', 'pairing', String(telegram_id));
   if (fs.existsSync(pairingDir)) {
     fs.rmSync(pairingDir, { recursive: true, force: true });
   }
-  if (activeSessions[telegram_id]) delete activeSessions[telegram_id];
-  // NO reinicies el proceso ni recargues comandos aquí.
+  
+  if (activeSessions[telegram_id]) {
+    delete activeSessions[telegram_id];
+  }
 }
 
 function defineBuyOptions(chatId) {
@@ -202,21 +202,19 @@ async function sendUserMenu(chatId) {
 // --- CARGA LOS COMANDOS DE USUARIO DESDE chocoplus.js ---
 async function loadChocoplus() {
   bot.removeAllListeners();
-  
-  // Eliminar uso de require.cache y usar import dinámico
   try {
-    const chocoplusModule = await import(`./chocoplus.js?update=${Date.now()}`);
-    if (typeof chocoplusModule.default === 'function') {
-      chocoplusModule.default(bot, {
-        userStates,
-        activeSessions,
-        cleanSession,
-        sendUserMenu,
-        defineBuyOptions,
-        updateUserWhatsapp,
-        clearUserWhatsapp
-      });
-    }
+    delete require.cache[require.resolve('./chocoplus.js')];
+    const chocoplusModule = require('./chocoplus.js');
+    chocoplusModule(bot, {
+      userStates,
+      activeSessions,
+      cleanSession,
+      sendUserMenu,
+      defineBuyOptions,
+      updateUserWhatsapp,
+      clearUserWhatsapp,
+      startSession // Pasar startSession como dependencia
+    });
   } catch (err) {
     console.error('Error al cargar chocoplus.js:', err);
   }
@@ -242,7 +240,6 @@ fs.watchFile(chocoplusPath, reloadChocoplus);
 
 // Elimina los comandos de admin duplicados de este archivo, ya que ahora están en chocoplus.js
 // Borra todo este bloque:
-
 /*
 async function sendNotificationToAll(text) {
     db.all('SELECT telegram_id FROM users WHERE expires > ?', [new Date().toISOString()], async (err, rows) => {
@@ -357,3 +354,6 @@ process.on('unhandledRejection', reason => {
 
 // Mensaje final de inicio
 console.log('Telegram x Baileys conectado com sucesso');
+
+// Exportar startSession para otros módulos si es necesario
+module.exports = { startSession };
