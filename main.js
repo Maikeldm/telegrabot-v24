@@ -8,7 +8,7 @@ const { default: makeWASocket, Browsers, useMultiFileAuthState, DisconnectReason
 const { getUser, updateUserWhatsapp, clearUserWhatsapp, isActive, db } = require('./lib/users.js');
 const dotenv = require('dotenv');
 
-const TOKEN = process.env.BOT_TOKEN || '8374619961:AAH63uFQIPantsyzt6ephpIB0BtU67bc-Co'; // Usa .env
+const TOKEN = process.env.BOT_TOKEN || '8200479779:AAGCScmvkRxuv55NhFrGBWFwGnG_r3t4kAc'; // Usa .env
 const bot = new TelegramBot(TOKEN, { polling: true });
 
 const activeSessions = {};
